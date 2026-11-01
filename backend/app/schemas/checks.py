@@ -8,7 +8,7 @@ Severity = Literal["high", "medium", "low"]
 
 class SanityIssue(BaseModel):
     severity: Severity
-    check: str  # row_accounting | bad_numbers | range | date_coverage | target_leakage | below_baseline | stat_test | spot_check | plan_mismatch | unsupported_insight | implausible | kpi_jump | metric_drop | structure_changed
+    check: str  # row_accounting | bad_numbers | range | date_coverage | target_leakage | below_baseline (ML no better than baseline) | stat_test | spot_check | plan_mismatch | unsupported_insight | implausible | kpi_jump | metric_drop | structure_changed
     message: str
     suggested_fix: str = ""
     layer: Literal[1, 2, 3, 4] = 1  # 4 = comparison with past runs

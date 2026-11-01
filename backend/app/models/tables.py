@@ -68,6 +68,7 @@ class Dataset(SQLModel, table=True):
     original_name: str
     file_path: str
     file_type: str  # csv | xlsx | parquet | json
+    purpose: str = "initial"  # "initial" (first run) | "rerun" (uploaded to a saved pipeline)
     profile_json: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # DatasetProfile
     uploaded_at: datetime = Field(default_factory=utcnow)
 

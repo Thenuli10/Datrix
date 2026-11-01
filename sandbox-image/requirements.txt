@@ -1,0 +1,15 @@
+# Pinned libraries available to generated analysis code (no pip install at runtime, PLAN.md §5).
+# Keep in sync with the library list given to the Code Generator.
+pandas==3.1.0
+numpy==2.5.4
+scipy==1.18.1
+scikit-learn==1.9.1
+# CPU-only build of xgboost (same `import xgboost`, without the ~200 MB CUDA/NCCL wheels).
+xgboost-cpu==3.4.1
+lightgbm==4.7.0
+statsmodels==0.15.0
+pyarrow==26.0.0
+openpyxl==3.1.5
+joblib==1.6.0
+# Optional (large, slow to build): forecasting with Prophet.
+# prophet==1.1.7

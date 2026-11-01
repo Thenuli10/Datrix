@@ -1,0 +1,25 @@
+# Backend + frontend in containers.
+#
+# NOTE: the recommended v1 setup is the backend running natively (see README), because
+# analysis containers are started on the host daemon and their bind mounts must be HOST
+# paths. Inside this compose setup the backend sees /data/storage, so the sandbox runs with
+# SANDBOX_BACKEND=local here (subprocess, no isolation) until host-path translation is added.
+services:
+  backend:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      STORAGE_DIR: /data/storage
+      SANDBOX_BACKEND: local
+      FRONTEND_URL: http://frontend:3000
+      CORS_ORIGINS: '["http://localhost:3000"]'
+    volumes:
+      - ./storage:/data/storage
+    ports: ["8000:8000"]
+
+  frontend:
+    build: ./frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports: ["3000:3000"]
+    depends_on: [backend]
