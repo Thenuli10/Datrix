@@ -1,0 +1,37 @@
+[project]
+name = "datrix-backend"
+version = "0.1.0"
+description = "Adaptive Data Analysis Platform - FastAPI backend"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlmodel>=0.0.22",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "python-multipart>=0.0.9",
+    "sse-starlette>=2.1",
+    "openai>=1.50",
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "scipy>=1.13",
+    "duckdb>=1.1",
+    "pyarrow>=17",
+    "openpyxl>=3.1",
+    "docker>=7.1",
+    "playwright>=1.47",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "httpx>=0.27"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

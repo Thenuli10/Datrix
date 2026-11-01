@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>System Architecture</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #111827;
+    --muted: #6b7280;
+    --panel: #f3f4f6;
+    --border: #d1d5db;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111827;
+      --fg: #f3f4f6;
+      --muted: #9ca3af;
+      --panel: #1f2937;
+      --border: #374151;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+    padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  h1 { font-size: 16px; margin: 0 auto 0 0; }
+  .hint { font-size: 13px; color: var(--muted); }
+  button { font: inherit; font-size: 14px; padding: 6px 12px; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); }
+  button:hover { border-color: var(--muted); }
+  #stage { position: absolute; top: 56px; left: 0; right: 0; bottom: 0; overflow: hidden; cursor: grab; }
+  #stage:active { cursor: grabbing; }
+  #stage svg { width: 100% !important; height: 100% !important; max-width: none !important; }
+  #source { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>System Architecture</h1>
+  <span class="hint">Scroll to zoom · drag to move</span>
+  <button id="zoomIn" title="Zoom in">+</button>
+  <button id="zoomOut" title="Zoom out">−</button>
+  <button id="fit" title="Fit to screen">Fit</button>
+</header>
+<div id="stage"></div>
+
+<!-- Keep in sync with the "System Architecture" diagram in PLAN.md §4 -->
+<pre id="source">
+flowchart LR
+    subgraph FE[Next.js Frontend]
+        P1[Project Wizard]
+        P2[Data Upload &amp; Gap Report]
+        P3[Plan Review]
+        P4[Run Logs - live]
+        P5[Dashboard Renderer]
+        P6[Pipelines &amp; Runs]
+    end
+
+    subgraph BE[FastAPI Backend]
+        API[REST API + SSE]
+        ORCH[Workflow Orchestrator&lt;br/&gt;state machine]
+        AG[Agents&lt;br/&gt;Analyst / Validator / Planner / Coder / Composer]
+        QA[Checking agents&lt;br/&gt;Sanity Checker / Dashboard QA]
+        SHOT[Screenshot service&lt;br/&gt;Playwright]
+        PROF[Data Profiler&lt;br/&gt;DuckDB + pandas]
+        JOB[Job Runner]
+        SBXM[Sandbox Manager&lt;br/&gt;docker SDK]
+    end
+
+    FE <-->|HTTP / SSE| API
+    API --> ORCH
+    ORCH --> AG
+    ORCH --> QA
+    QA --> SHOT
+    SHOT -->|renders /render/runs/id| FE
+    ORCH --> PROF
+    ORCH --> JOB
+    JOB --> SBXM
+    AG <-->|API| OAI[(OpenAI)]
+    SBXM --> DK[[Docker: analysis-runner image]]
+    BE --> DB[(SQLite)]
+    BE --> FS[(Local storage&lt;br/&gt;uploads / artifacts / models)]
+    DK --> FS
+</pre>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+<script>
+  (async () => {
+    const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "default" });
+    const source = document.getElementById("source").textContent;
+    const { svg } = await mermaid.render("arch", source);
+    const stage = document.getElementById("stage");
+    stage.innerHTML = svg;
+    const svgEl = stage.querySelector("svg");
+    // Mermaid sets an inline max-width; let the SVG fill the stage instead
+    svgEl.removeAttribute("style");
+    svgEl.setAttribute("width", "100%");
+    svgEl.setAttribute("height", "100%");
+
+    let panZoom = null;
+    const refit = () => {
+      if (!stage.clientWidth || !stage.clientHeight) return; // hidden: wait for a real size
+      if (!panZoom) {
+        panZoom = svgPanZoom(svgEl, {
+          zoomEnabled: true,
+          controlIconsEnabled: false,
+          fit: true,
+          center: true,
+          minZoom: 0.2,
+          maxZoom: 20,
+          zoomScaleSensitivity: 0.3,
+        });
+        return;
+      }
+      panZoom.resize();
+      panZoom.fit();
+      panZoom.center();
+    };
+    new ResizeObserver(refit).observe(stage);
+
+    document.getElementById("zoomIn").onclick = () => panZoom && panZoom.zoomIn();
+    document.getElementById("zoomOut").onclick = () => panZoom && panZoom.zoomOut();
+    document.getElementById("fit").onclick = refit;
+  })();
+</script>
+</body>
+</html>

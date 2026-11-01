@@ -1,0 +1,20 @@
+"""SQLite engine and session helpers."""
+from collections.abc import Iterator
+
+from sqlmodel import Session, SQLModel, create_engine
+
+from app.core.config import settings
+
+settings.storage_dir.mkdir(parents=True, exist_ok=True)
+engine = create_engine(settings.db_url, connect_args={"check_same_thread": False})
+
+
+def init_db() -> None:
+    from app.models import tables  # noqa: F401  (register tables)
+
+    SQLModel.metadata.create_all(engine)
+
+
+def get_session() -> Iterator[Session]:
+    with Session(engine) as session:
+        yield session

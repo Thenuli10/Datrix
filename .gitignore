@@ -1,0 +1,12 @@
+storage/
+!storage/.gitkeep
+**/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+backend/.env
+*.egg-info/
+node_modules/
+frontend/.next/
+frontend/out/
+.env.local
