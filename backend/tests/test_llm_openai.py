@@ -143,5 +143,5 @@ def test_log_writes_row_and_never_raises(monkeypatch):
 
 def test_estimate_cost_prefix():
     assert estimate_cost("gpt-4.1-mini-2025-04-14", 1_000_000, 0) == pytest.approx(0.40)
-    assert estimate_cost("unknown-model", 10, 10) == 0.0
+    assert estimate_cost("unknown-model", 1_000_000, 0) == pytest.approx(5.00)  # fail safe, not free
     assert oc.PRICES["gpt-4.1"][0] > oc.PRICES["gpt-4.1-mini"][0]

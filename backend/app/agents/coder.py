@@ -15,7 +15,9 @@ FALLBACK_LIBS = ["pandas", "numpy", "scipy", "scikit-learn", "xgboost", "lightgb
                  "openpyxl", "joblib"]
 IMPORT_NAMES = {"scikit-learn": "sklearn", "pyyaml": "yaml", "python-dateutil": "dateutil"}
 REQUIREMENTS = REPO_DIR / "sandbox-image" / "requirements.txt"
-LOG_TAIL = 4000
+LOG_TAIL = 4000  # chars of stderr fed back to the model (stdout gets half)
+ERROR_HEAD = 1000
+FEEDBACK_MAX = 6000  # "Problems to fix" chars per request
 
 # Built through the schema so the prompt can never drift from app/schemas/results.py.
 RESULTS_EXAMPLE = Results.model_validate({
@@ -92,7 +94,7 @@ def generate(llm: LLMClient, plan: AnalysisPlan, profiles_canonical: list[Datase
     if previous_code:
         user += f"\n\n## Previous version of the code\n```python\n{previous_code}\n```"
     if feedback:
-        user += (f"\n\n## Problems to fix\n{feedback}\n\nReturn the COMPLETE corrected file, "
+        user += (f"\n\n## Problems to fix\n{feedback[:FEEDBACK_MAX]}\n\nReturn the COMPLETE corrected file, "
                  "not a diff. Fix the root cause.")
     return strip_code_fences(llm.text(agent="coder", system=system_prompt(), user=user, project_id=pid))
 
@@ -138,7 +140,7 @@ def _static_violations(code: str) -> list[str]:
 
 
 def _failure_feedback(result: Any) -> str:
-    parts = [f"Execution failed: {getattr(result, 'error', None) or 'unknown error'}"]
+    parts = [f"Execution failed: {(getattr(result, 'error', None) or 'unknown error')[:ERROR_HEAD]}"]
     if stderr := (getattr(result, "stderr", "") or "")[-LOG_TAIL:]:
         parts.append(f"stderr (tail):\n{stderr}")
     if stdout := (getattr(result, "stdout", "") or "")[-LOG_TAIL // 2:]:
@@ -149,7 +151,8 @@ def _failure_feedback(result: Any) -> str:
 def fix_loop(llm: LLMClient, plan: AnalysisPlan, profiles: list[DatasetProfile], manifest: dict[str, Any],
              pid: int | None, run_fn: Callable[[str], Any], on_log: Callable[[str], None] | None = None,
              feedback: str | None = None, previous_code: str | None = None) -> tuple[str, Any]:
-    """Generate -> static check -> run, feeding errors back, up to settings.max_fix_attempts.
+    """Generate -> static check -> run, feeding errors back: at most settings.max_fix_attempts coder calls.
+    LLM errors (incl. LLMBudgetExceeded) propagate and are never retried here.
 
     `run_fn(code)` returns a SandboxResult-like object (.ok/.error/.stderr/.stdout).
     Returns (last code, last result)."""

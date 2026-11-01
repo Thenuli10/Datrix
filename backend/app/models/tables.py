@@ -137,10 +137,11 @@ class LLMCall(SQLModel, table=True):
     __tablename__ = "llm_calls"
     id: int | None = Field(default=None, primary_key=True)
     project_id: int | None = Field(default=None, index=True)
+    run_id: int | None = Field(default=None, index=True)  # set for calls made inside a run
     agent: str
     model: str = ""
     prompt_tokens: int = 0
     completion_tokens: int = 0
     cost: float = 0.0
     latency: float = 0.0
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: datetime = Field(default_factory=utcnow, index=True)

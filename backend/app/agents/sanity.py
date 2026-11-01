@@ -1,6 +1,6 @@
 """Results Sanity Checker, Layer 3 (PLAN §7a): LLM review of results vs requirement and plan.
 Gets profiles and results only, never raw data."""
-from app.agents._common import llm_profile, load_prompt, to_json
+from app.agents._common import llm_profile, llm_results, load_prompt, to_json
 from app.llm.base import LLMClient
 from app.schemas.checks import SanityIssue, SanityReport
 from app.schemas.data import DatasetProfile
@@ -15,7 +15,7 @@ def review(llm: LLMClient, requirement: str, plan: AnalysisPlan, profiles: list[
            results: Results, findings: list[SanityIssue], pid: int | None) -> SanityReport:
     user = (f"## Requirement\n{requirement}\n\n## Approved plan\n{to_json(plan)}\n\n"
             f"## Input data profiles\n{to_json([llm_profile(p, 5) for p in profiles])}\n\n"
-            f"## results.json\n{to_json(results)}\n\n"
+            f"## results.json (long tables/series trimmed)\n{to_json(llm_results(results))}\n\n"
             f"## Layer 1-2 findings (code checks / recalculation)\n{to_json(findings) if findings else '(none)'}")
     rep = llm.structured(agent="sanity", system=load_prompt("sanity"), user=user, schema=SanityReport,
                          project_id=pid)

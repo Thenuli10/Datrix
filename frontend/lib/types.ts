@@ -557,3 +557,16 @@ export interface DashboardPayload {
 
 export type RerunMode = "predict" | "retrain" | "script";
 export type DataMode = "replace" | "append";
+
+/** GET /usage: OpenAI spend (estimated, from llm_calls) and the configured caps. */
+export interface Usage {
+  fake: boolean;
+  today: { cost_usd: number; calls: number };
+  projects: { project_id: number | null; cost_usd: number; calls: number }[];
+  limits: {
+    daily_budget_usd: number;
+    max_cost_per_project_usd: number;
+    max_cost_per_run_usd: number;
+    max_calls_per_project: number;
+  };
+}

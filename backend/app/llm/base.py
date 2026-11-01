@@ -2,6 +2,9 @@
 can be swapped later. Implementations: app.llm.openai_client.OpenAIClient,
 app.llm.fake.FakeLLMClient (tests / offline)."""
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Callable, TypeVar
 
 from pydantic import BaseModel
@@ -10,6 +13,27 @@ T = TypeVar("T", bound=BaseModel)
 
 # A tool the model may call: name -> (JSON schema of params, python callable(**kwargs) -> JSON-able)
 Tool = tuple[dict[str, Any], Callable[..., Any]]
+
+# Run the current LLM calls belong to (set by the orchestrator for the duration of a run),
+# so clients can attribute spend and enforce the per-run cap without changing agent signatures.
+current_run_id: ContextVar[int | None] = ContextVar("current_run_id", default=None)
+
+
+@contextmanager
+def llm_run_scope(run_id: int) -> Iterator[None]:
+    token = current_run_id.set(run_id)
+    try:
+        yield
+    finally:
+        current_run_id.reset(token)
+
+
+class LLMError(RuntimeError):
+    """The model refused or returned no parsable answer."""
+
+
+class LLMBudgetExceeded(LLMError):
+    """A spend cap (settings.llm_*) was hit; the request was NOT sent. Never retried."""
 
 
 class LLMClient(ABC):

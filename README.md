@@ -42,6 +42,30 @@ npm run dev                                           # http://localhost:3000
 Without Docker you can set `SANDBOX_BACKEND=local` in `backend/.env` to run generated code as a
 plain subprocess. **That has no isolation**; use it only for development.
 
+## OpenAI spend limits
+
+Every OpenAI request goes through one gateway (`OpenAIClient._call`) that checks the spend logged
+in `llm_calls` first. If a cap is reached the request is **not sent**: a run ends `FAILED` with the
+reason, and request-time steps (chat, validate, plan, auto-map) return HTTP 402. The nav bar shows
+today's estimated spend (`GET /usage`). Defaults suit a ~$5 prepaid balance; change them in
+`backend/.env` (see `.env.example`) and restart the backend.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `LLM_MAX_COST_PER_RUN_USD` | 0.50 | per first run / re-run |
+| `LLM_MAX_COST_PER_PROJECT_USD` | 2.00 | all calls of one project |
+| `LLM_DAILY_BUDGET_USD` | 3.00 | all projects, per UTC day |
+| `LLM_MAX_CALLS_PER_PROJECT` | 150 | request count per project |
+| `LLM_MAX_OUTPUT_TOKENS` / `_OTHER` | 8000 / 4000 | `max_completion_tokens` for code generation / other agents |
+| `LLM_MAX_INPUT_CHARS` | 200000 | prompt text per request |
+| `LLM_TOOL_MAX_STEPS`, `LLM_TOOL_OUTPUT_CHARS`, `LLM_TOOL_TOTAL_OUTPUT_CHARS` | 8, 8000, 60000 | validator tool loop |
+| `LLM_MAX_IMAGES`, `LLM_VISION_DETAIL` | 4, high | dashboard vision review |
+| `MAX_FIX_ATTEMPTS`, `MAX_SANITY_ROUNDS`, `MAX_DASHBOARD_QA_ROUNDS` | 4, 2, 2 | agent loop bounds |
+
+Costs are estimates (`PRICES` in `app/llm/openai_client.py`); a cap can be overshot by at most the
+one request in flight. Only one run per project can be active, duplicate LLM requests for a busy
+project get 409, and runs interrupted by a backend restart are marked `FAILED` (never resumed).
+
 ## Tests
 
 ```bash

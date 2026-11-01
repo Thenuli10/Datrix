@@ -9,6 +9,11 @@ updating every user. All paths are `pathlib.Path`. Python ≥ 3.12, backend runs
 - `openai_client.py`: `class OpenAIClient(LLMClient)` — OpenAI SDK, `client.beta.chat.completions.parse` /
   `responses` structured outputs from Pydantic, tool calling, vision via base64 PNG; logs every call to `LLMCall`
   (tokens, cost estimate, latency) in its own DB session.
+  `_call` is the only gateway to the API: it enforces `budget.check_budget` (per-run / per-project / daily /
+  call-count caps, raising `LLMBudgetExceeded`), `LLM_MAX_INPUT_CHARS` and `max_completion_tokens`.
+- `base.py`: also `LLMError`, `LLMBudgetExceeded(LLMError)` (never retried) and `current_run_id` /
+  `llm_run_scope(run_id)` — set by the orchestrator for a run so spend is attributed to `LLMCall.run_id`.
+- `budget.py`: `check_budget(project_id, run_id)`, `usage_summary(session)` (served at `GET /usage`).
 - `fake.py`: `class FakeLLMClient(LLMClient)` — deterministic, registry of canned responses per `agent` name
   (`fake.register(agent, response_or_callable)`); falls back to building a minimal valid instance of the schema.
 - `__init__.py`: `get_llm() -> LLMClient` (Fake when `settings.llm_fake` or no API key in tests).
@@ -79,4 +84,6 @@ updating every user. All paths are `pathlib.Path`. Python ≥ 3.12, backend runs
 - `GET /projects/{id}/datasets`, `GET /projects/{id}/validation`, `GET /projects/{id}/plan`, `GET /projects/{id}/runs`,
   `GET /runs/{id}/dashboard` (spec + results + sanity + qa + insights in one payload), `GET /runs/{id}/thumbnail`,
   `GET /pipelines` list, `GET /pipelines/{id}/code` (not shown in UI by default).
+- `GET /usage`: today's estimated OpenAI spend, per-project totals, configured caps. A hit cap -> 402;
+  a duplicate LLM request for a busy project or a second active run -> 409.
 - `POST /pipelines/{id}/runs` multipart: files + `mode` (predict|retrain|script) + `data_mode` (replace|append).

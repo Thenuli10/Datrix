@@ -13,6 +13,7 @@ from app.schemas import AnalysisPlan, ColumnMapping
 from app.services import orchestrator as orch
 from app.services import profiler
 from app.services.jobs import jobs
+from app.services.locks import project_lock
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -73,7 +74,8 @@ def get_project(project_id: int, session: Session = Depends(get_session)) -> dic
 @router.post("/{project_id}/messages")
 def post_message(project_id: int, body: MessageIn, session: Session = Depends(get_session)) -> dict[str, Any]:
     p = get_or_404(session, Project, project_id)
-    orch.answer_message(session, p, body.content)
+    with project_lock(project_id, "requirement analysis"):
+        orch.answer_message(session, p, body.content)
     return _detail(session, p)
 
 
@@ -120,7 +122,9 @@ def delete_dataset(project_id: int, dataset_id: int, session: Session = Depends(
 
 @router.post("/{project_id}/validate")
 def validate(project_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:
-    return orch.validate(session, get_or_404(session, Project, project_id)).model_dump(mode="json")
+    p = get_or_404(session, Project, project_id)
+    with project_lock(project_id, "validation"):
+        return orch.validate(session, p).model_dump(mode="json")
 
 
 @router.get("/{project_id}/validation")
@@ -137,7 +141,9 @@ def put_mapping(project_id: int, body: MappingIn, session: Session = Depends(get
 
 @router.post("/{project_id}/plan")
 def make_plan(project_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:
-    return orch.propose_plan(session, get_or_404(session, Project, project_id)).model_dump(mode="json")
+    p = get_or_404(session, Project, project_id)
+    with project_lock(project_id, "plan generation"):
+        return orch.propose_plan(session, p).model_dump(mode="json")
 
 
 @router.get("/{project_id}/plan")
@@ -149,7 +155,9 @@ def get_plan(project_id: int, session: Session = Depends(get_session)) -> dict[s
 @router.post("/{project_id}/plan/approve")
 def approve_plan(project_id: int, body: ApproveIn | None = None,
                  session: Session = Depends(get_session)) -> dict[str, Any]:
-    run = orch.approve_plan(session, get_or_404(session, Project, project_id), body.plan if body else None)
+    p = get_or_404(session, Project, project_id)
+    with project_lock(project_id, "plan approval"):  # 409 on double-click; active runs are rejected too
+        run = orch.approve_plan(session, p, body.plan if body else None)
     jobs.submit(orch.execute_first_run, run.id)
     return run.model_dump(mode="json")
 

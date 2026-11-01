@@ -31,3 +31,11 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         skip = pytest.mark.skip(reason="Docker daemon not reachable")
         for item in docker_items:
             item.add_marker(skip)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _init_db() -> None:
+    """Tables must exist: OpenAIClient checks spend caps against llm_calls before every request."""
+    from app.core.db import init_db
+
+    init_db()

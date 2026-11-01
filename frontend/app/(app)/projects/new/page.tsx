@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, Bot, HelpCircle, Send, Sparkles, Target, User } from "lucide-react";
 import { api, errorMessage } from "@/lib/api";
+import { useSingleFlight } from "@/lib/hooks";
 import type { Project } from "@/lib/types";
 import { humanize } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -33,28 +34,31 @@ function RequirementForm({ onCreated }: { onCreated: (p: Project) => void }) {
   const [horizon, setHorizon] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const once = useSingleFlight();
 
-  const submit = async (e: React.FormEvent) => {
+  const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (requirement.trim().length < 3) {
       setError("Describe what you want to learn (at least a sentence).");
       return;
     }
-    setBusy(true);
-    setError(null);
-    try {
-      const context: Record<string, string> = {};
-      if (domain.trim()) context.domain = domain.trim();
-      if (goal.trim()) context.goal = goal.trim();
-      if (horizon.trim()) context.time_horizon = horizon.trim();
-      const p = await api.createProject({ requirement: requirement.trim(), name: name.trim() || undefined, context });
-      toast.success("Project created");
-      onCreated(p);
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
+    void once(async () => {
+      setBusy(true);
+      setError(null);
+      try {
+        const context: Record<string, string> = {};
+        if (domain.trim()) context.domain = domain.trim();
+        if (goal.trim()) context.goal = goal.trim();
+        if (horizon.trim()) context.time_horizon = horizon.trim();
+        const p = await api.createProject({ requirement: requirement.trim(), name: name.trim() || undefined, context });
+        toast.success("Project created");
+        onCreated(p);
+      } catch (err) {
+        setError(errorMessage(err));
+      } finally {
+        setBusy(false);
+      }
+    });
   };
 
   return (
@@ -166,21 +170,25 @@ function Clarify({ project, onUpdate }: { project: Project; onUpdate: (p: Projec
     endRef.current?.scrollIntoView({ block: "nearest" });
   }, [project.messages.length]);
 
-  const send = async (e: React.FormEvent) => {
+  const once = useSingleFlight();
+
+  const send = (e: React.FormEvent) => {
     e.preventDefault();
     const text = answer.trim();
     if (!text) return;
-    setBusy(true);
-    try {
-      const p = await api.postMessage(project.id, text);
-      setAnswer("");
-      onUpdate(p);
-      if (p.analysis?.ready) toast.success("Requirement is clear", "Here is the data you need.");
-    } catch (err) {
-      toast.error("Could not send answer", errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
+    void once(async () => {
+      setBusy(true);
+      try {
+        const p = await api.postMessage(project.id, text);
+        setAnswer("");
+        onUpdate(p);
+        if (p.analysis?.ready) toast.success("Requirement is clear", "Here is the data you need.");
+      } catch (err) {
+        toast.error("Could not send answer", errorMessage(err));
+      } finally {
+        setBusy(false);
+      }
+    });
   };
 
   const hasRequirementMsg = project.messages.some((m) => m.role === "user" && m.content === project.requirement_text);

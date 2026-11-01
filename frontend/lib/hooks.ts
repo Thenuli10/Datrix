@@ -44,6 +44,24 @@ export function useLoad<T>(fn: () => Promise<T>, deps: React.DependencyList): Lo
   return { data, error, loading, reload, setData };
 }
 
+/**
+ * Guard for actions that cost LLM credits: while one call is in flight, further triggers
+ * (double-clicks, Enter + click, re-renders, StrictMode effects) are ignored. Unlike a
+ * `busy` state, the ref flips synchronously, so two clicks in the same frame can't both fire.
+ */
+export function useSingleFlight() {
+  const inFlight = React.useRef(false);
+  return React.useCallback(async <T,>(fn: () => Promise<T>): Promise<T | undefined> => {
+    if (inFlight.current) return undefined;
+    inFlight.current = true;
+    try {
+      return await fn();
+    } finally {
+      inFlight.current = false;
+    }
+  }, []);
+}
+
 /** Run `fn` every `ms` while `active`. */
 export function useInterval(fn: () => void, ms: number, active = true) {
   const ref = React.useRef(fn);

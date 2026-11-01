@@ -1,5 +1,6 @@
 """Application settings, loaded from environment / backend/.env."""
 from pathlib import Path
+from typing import Literal
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,6 +19,21 @@ class Settings(BaseSettings):
     openai_vision_model: str = "gpt-4.1"
     llm_sample_rows: int = 20  # max sample rows ever sent to the LLM (privacy, §9)
     llm_fake: bool = False  # use FakeLLMClient (tests / offline)
+
+    # LLM spend caps (checked in OpenAIClient before every request; summed from llm_calls)
+    llm_max_cost_per_run_usd: float = 0.50
+    llm_max_cost_per_project_usd: float = 2.00
+    llm_daily_budget_usd: float = 3.00  # all projects, per UTC day
+    llm_max_calls_per_project: int = 150
+    llm_max_output_tokens: int = 8000  # code generation (coder)
+    llm_max_output_tokens_other: int = 4000  # every other agent
+    llm_max_input_chars: int = 200_000  # text sent per request (~50k tokens); larger prompts are refused
+    llm_tool_max_steps: int = 8  # tool-calling rounds per validator loop (+1 final answer)
+    llm_tool_max_calls_per_step: int = 8
+    llm_tool_output_chars: int = 8000  # per tool result
+    llm_tool_total_output_chars: int = 60_000  # per tool loop; then the model must answer
+    llm_max_images: int = 4  # screenshots per vision call
+    llm_vision_detail: Literal["low", "high", "auto"] = "high"
 
     # Storage
     storage_dir: Path = REPO_DIR / "storage"

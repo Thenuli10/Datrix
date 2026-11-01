@@ -12,6 +12,7 @@ import json
 import logging
 import shutil
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ from app.checks import dashboard_rules, run_compare, sanity_rules
 from app.core.config import settings
 from app.core.db import engine
 from app.llm import get_llm
+from app.llm.base import LLMBudgetExceeded, llm_run_scope
 from app.models import (
     DataSpecRow, Dataset, Message, Pipeline, Plan, Project, ProjectStatus, Run, RunStatus, Validation,
 )
@@ -44,6 +46,10 @@ log = logging.getLogger(__name__)
 
 class WorkflowError(Exception):
     """A user-facing error: wrong state or missing prerequisite."""
+
+
+ACTIVE_RUN = (RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.CHECKING)
+INTERRUPTED = "Interrupted by server restart"
 
 
 # ---------------------------------------------------------------- helpers
@@ -253,7 +259,36 @@ def propose_plan(session: Session, project: Project) -> Plan:
     return row
 
 
+def ensure_no_active_run(session: Session, project_id: int) -> None:
+    """One run per project at a time: a duplicate approve/re-run must not start a second (paid) run."""
+    active = session.exec(select(Run).where(Run.project_id == project_id,
+                                            Run.status.in_(ACTIVE_RUN))).first()  # type: ignore[attr-defined]
+    if active:
+        raise WorkflowError(f"Run #{active.id} is still {active.status.lower()} for this project; "
+                            "wait for it to finish.")
+
+
+def fail_interrupted_runs() -> int:
+    """Startup: runs left QUEUED/RUNNING/CHECKING by a crash or reload have no worker any more.
+    Mark them FAILED (never auto-resume: that would spend LLM credits unasked)."""
+    with _session() as s:
+        stuck = s.exec(select(Run).where(Run.status.in_(ACTIVE_RUN))).all()  # type: ignore[attr-defined]
+        for run in stuck:
+            run.status, run.error, run.stage, run.finished_at = RunStatus.FAILED, INTERRUPTED, "Failed", utcnow()
+            s.add(run)
+            project = s.get(Project, run.project_id)
+            if project and project.status in (ProjectStatus.PLAN_APPROVED, ProjectStatus.RUNNING,
+                                              ProjectStatus.RERUNNING):
+                project.status = ProjectStatus.COMPLETED if _has_pipeline(s, project.id) else ProjectStatus.FAILED
+                s.add(project)
+        s.commit()
+    if stuck:
+        log.warning("marked %d interrupted run(s) as FAILED", len(stuck))
+    return len(stuck)
+
+
 def approve_plan(session: Session, project: Project, edited: AnalysisPlan | None = None) -> Run:
+    ensure_no_active_run(session, project.id)
     row = _latest(session, Plan, project.id)
     if not row:
         raise WorkflowError("No plan to approve.")
@@ -345,6 +380,8 @@ def _compose_dashboard(ctx: RunContext, run_id: int, run_dir: Path, results: Res
     all_issues: list[DashboardIssue] = []
     shots: list[str] = []
     rounds = 0
+    # QA round r reviews the current spec; rounds 1..max_dashboard_qa_rounds may send it back to the
+    # composer, the final round only verifies the last fix: <= 1 + max rounds composer and vision calls.
     for rounds in range(1, settings.max_dashboard_qa_rounds + 2):
         spec, rule_issues = dashboard_rules.check_and_fix(spec, results)
         _write_json(run_dir / "dashboard.json", spec.model_dump())
@@ -406,14 +443,23 @@ def _fail(run_id: int, ctx: RunContext, msg: str) -> None:
     _finish_run(run_id, status=RunStatus.FAILED, error=msg, stage="Failed")
 
 
-def execute_first_run(run_id: int) -> None:
+def _guarded(run_id: int, body: Callable[[int, RunContext], None]) -> None:
+    """Run `body(run_id, ctx)` with LLM spend attributed to the run; any error fails the run once."""
     ctx = RunContext(run_id)
     try:
-        _execute_first_run(run_id, ctx)
+        with llm_run_scope(run_id):
+            body(run_id, ctx)
+    except LLMBudgetExceeded as e:  # a cap was hit: stop here, no retries, no further LLM calls
+        log.warning("run %s stopped: %s", run_id, e)
+        _fail(run_id, ctx, str(e))
     except Exception as e:
         log.exception("run %s failed", run_id)
         ctx.log(traceback.format_exc())
         _fail(run_id, ctx, f"{type(e).__name__}: {e}")
+
+
+def execute_first_run(run_id: int) -> None:
+    _guarded(run_id, _execute_first_run)
 
 
 def _execute_first_run(run_id: int, ctx: RunContext) -> None:
@@ -463,6 +509,7 @@ def _execute_first_run(run_id: int, ctx: RunContext) -> None:
     spot_code: str | None = None
     report_s: SanityReport | None = None
     results: Results | None = None
+    # 1 initial generation + at most max_sanity_rounds fix rounds; each runs fix_loop (<= max_fix_attempts calls)
     for rnd in range(settings.max_sanity_rounds + 1):
         ctx.stage("Generating analysis code" if rnd == 0 else f"Fixing results (round {rnd})")
         code, res = coder.fix_loop(llm, plan, canon_profiles, manifest, pid, run_fn,
@@ -475,6 +522,8 @@ def _execute_first_run(run_id: int, ctx: RunContext) -> None:
         if spot_code is None:
             try:
                 spot_code = coder.generate_spot_check(llm, plan, results, manifest, pid)
+            except LLMBudgetExceeded:
+                raise
             except Exception as e:
                 ctx.log(f"[sanity] could not generate spot-check: {e}")
                 spot_code = ""
@@ -546,6 +595,7 @@ def _execute_first_run(run_id: int, ctx: RunContext) -> None:
 def rerun(session: Session, pipeline: Pipeline, dataset_ids: list[int], mode: str, data_mode: str,
           mapping_override: dict[str, str] | None = None) -> Run:
     """mode: predict | retrain | script. data_mode: replace | append."""
+    ensure_no_active_run(session, pipeline.project_id)
     if pipeline.path == "script":
         mode = "script"
     elif mode not in ("predict", "retrain"):
@@ -574,13 +624,7 @@ def suggest_mapping(session: Session, pipeline: Pipeline, dataset_ids: list[int]
 
 
 def execute_rerun(run_id: int) -> None:
-    ctx = RunContext(run_id)
-    try:
-        _execute_rerun(run_id, ctx)
-    except Exception as e:
-        log.exception("rerun %s failed", run_id)
-        ctx.log(traceback.format_exc())
-        _fail(run_id, ctx, f"{type(e).__name__}: {e}")
+    _guarded(run_id, _execute_rerun)
 
 
 def _execute_rerun(run_id: int, ctx: RunContext) -> None:

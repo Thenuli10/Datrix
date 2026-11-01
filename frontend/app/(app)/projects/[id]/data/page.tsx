@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight, CheckCheck, Upload } from "lucide-react";
 import { api, errorMessage } from "@/lib/api";
-import { useIdParam, useLoad } from "@/lib/hooks";
+import { useIdParam, useLoad, useSingleFlight } from "@/lib/hooks";
 import type { ColumnMapping, Dataset, Validation } from "@/lib/types";
 import { Alert } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -32,6 +32,7 @@ export default function DataPage() {
   const [files, setFiles] = React.useState<File[]>([]);
   const [progress, setProgress] = React.useState<number | null>(null);
   const [validating, setValidating] = React.useState(false);
+  const once = useSingleFlight();
   const [savingMap, setSavingMap] = React.useState(false);
   const [deleting, setDeleting] = React.useState<number | null>(null);
 
@@ -63,22 +64,23 @@ export default function DataPage() {
     }
   };
 
-  const runValidate = async () => {
-    setValidating(true);
-    try {
-      const res = await api.validate(id);
-      validation.setData(res);
-      void project.reload();
-      toast.success(
-        res.status === "needs_more_data" ? "Validation found gaps" : "Data validated",
-        res.status === "needs_more_data" ? "See the gap report below." : undefined,
-      );
-    } catch (e) {
-      toast.error("Validation failed", errorMessage(e));
-    } finally {
-      setValidating(false);
-    }
-  };
+  const runValidate = () =>
+    once(async () => {
+      setValidating(true);
+      try {
+        const res = await api.validate(id);
+        validation.setData(res);
+        void project.reload();
+        toast.success(
+          res.status === "needs_more_data" ? "Validation found gaps" : "Data validated",
+          res.status === "needs_more_data" ? "See the gap report below." : undefined,
+        );
+      } catch (e) {
+        toast.error("Validation failed", errorMessage(e));
+      } finally {
+        setValidating(false);
+      }
+    });
 
   const saveMapping = async (m: ColumnMapping[]) => {
     setSavingMap(true);

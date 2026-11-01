@@ -1,9 +1,45 @@
 "use client";
+import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Database, FolderKanban, Plus, Workflow } from "lucide-react";
+import { api } from "@/lib/api";
+import type { Usage } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./theme";
+
+/** "OpenAI today: $0.12 / $3.00" — refreshed on navigation (GET only, no LLM calls). */
+function UsageBadge({ pathname }: { pathname: string }) {
+  const [usage, setUsage] = React.useState<Usage | null>(null);
+  React.useEffect(() => {
+    let live = true;
+    api
+      .getUsage()
+      .then((u) => live && setUsage(u))
+      .catch(() => live && setUsage(null));
+    return () => {
+      live = false;
+    };
+  }, [pathname]);
+  if (!usage) return null;
+  const { cost_usd } = usage.today;
+  const limit = usage.limits.daily_budget_usd;
+  const near = limit > 0 && cost_usd >= 0.8 * limit;
+  return (
+    <span
+      className={cn("mr-2 hidden text-xs tabular-nums text-muted-foreground md:inline", near && "font-medium text-destructive")}
+      title={
+        usage.fake
+          ? "Offline mode (fake LLM): no OpenAI calls are made."
+          : `Estimated spend. Caps: $${usage.limits.max_cost_per_run_usd.toFixed(2)}/run, ` +
+            `$${usage.limits.max_cost_per_project_usd.toFixed(2)}/project, ` +
+            `${usage.limits.max_calls_per_project} calls/project (backend/.env).`
+      }
+    >
+      {usage.fake ? "OpenAI: offline" : `OpenAI today: $${cost_usd.toFixed(2)} / $${limit.toFixed(2)}`}
+    </span>
+  );
+}
 
 const LINKS = [
   { href: "/", label: "Projects", icon: FolderKanban, match: (p: string) => p === "/" || p.startsWith("/projects") },
@@ -41,6 +77,7 @@ export function AppNav() {
           })}
         </nav>
         <div className="ml-auto flex items-center gap-1">
+          <UsageBadge pathname={pathname} />
           <Link
             href="/projects/new"
             className="hidden h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 sm:inline-flex"

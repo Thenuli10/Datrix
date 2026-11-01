@@ -51,3 +51,32 @@ def snake_case(name: str) -> str:
     s = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name.strip())
     s = re.sub(r"[^0-9a-zA-Z]+", "_", s).strip("_").lower()
     return s or "col"
+
+
+LLM_TABLE_ROWS = 20
+LLM_SERIES_POINTS = 60
+LLM_LIST_ITEMS = 30
+
+
+def llm_results(r: BaseModel) -> dict[str, Any]:
+    """results.json capped for prompts: long tables/series are trimmed (with their true sizes),
+    so a big output (e.g. a 10k-row predictions table) can never blow up a prompt."""
+    d = r.model_dump(mode="json")
+    for t in d.get("tables") or []:
+        t["n_rows"] = len(t["rows"])
+        t["rows"] = t["rows"][:LLM_TABLE_ROWS]
+    for s in d.get("series") or []:
+        n = len(s["x"])
+        s["n_points"] = n
+        if n > LLM_SERIES_POINTS:  # evenly spaced, first and last kept
+            idx = sorted({round(i * (n - 1) / (LLM_SERIES_POINTS - 1)) for i in range(LLM_SERIES_POINTS)})
+            for k in ("x", "y", "y_lower", "y_upper"):
+                if isinstance(s.get(k), list) and len(s[k]) == n:
+                    s[k] = [s[k][i] for i in idx]
+    model = d.get("model") or {}
+    if isinstance(model.get("feature_importance"), list):
+        model["feature_importance"] = model["feature_importance"][:LLM_LIST_ITEMS]
+    for k in ("kpis", "stat_tests", "insights_raw"):
+        if isinstance(d.get(k), list):
+            d[k] = d[k][:LLM_LIST_ITEMS]
+    return d

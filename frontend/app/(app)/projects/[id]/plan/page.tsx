@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUp, CheckCircle2, Plus, RefreshCw, Rocket, Trash2, Wand2 } from "lucide-react";
 import { api, errorMessage } from "@/lib/api";
-import { useIdParam, useLoad } from "@/lib/hooks";
+import { useIdParam, useLoad, useSingleFlight } from "@/lib/hooks";
 import type { AnalysisPlan, MLSpec } from "@/lib/types";
 import { humanize } from "@/lib/format";
 import { Alert } from "@/components/ui/alert";
@@ -111,52 +111,66 @@ export default function PlanPage() {
   const [approving, setApproving] = React.useState(false);
   const [genError, setGenError] = React.useState<string | null>(null);
   const autoTried = React.useRef(false);
+  const once = useSingleFlight();
 
   React.useEffect(() => {
     if (planRow.data) setDraft(structuredClone(planRow.data.plan_json));
   }, [planRow.data]);
 
-  const generate = React.useCallback(async () => {
-    setGenerating(true);
-    setGenError(null);
-    try {
-      const row = await api.generatePlan(id);
-      planRow.setData(row);
-      void project.reload();
-    } catch (e) {
-      setGenError(errorMessage(e));
-    } finally {
-      setGenerating(false);
-    }
-  }, [id, planRow, project]);
+  const generate = React.useCallback(
+    () =>
+      once(async () => {
+        setGenerating(true);
+        setGenError(null);
+        try {
+          const row = await api.generatePlan(id);
+          planRow.setData(row);
+          void project.reload();
+        } catch (e) {
+          setGenError(errorMessage(e));
+        } finally {
+          setGenerating(false);
+        }
+      }),
+    [id, planRow, project, once],
+  );
 
-  // First visit after validation: propose a plan automatically.
+  // First visit after validation: propose a plan automatically, at most once per project per
+  // browser session (the ref covers re-renders/StrictMode, sessionStorage covers remounts).
+  // After a failure it never retries by itself: "Generate plan" is then an explicit click.
   React.useEffect(() => {
-    if (autoTried.current || planRow.loading || planRow.data || !project.data) return;
-    if (project.data.status === "DATA_VALIDATED") {
-      autoTried.current = true;
-      void generate();
-    }
-  }, [planRow.loading, planRow.data, project.data, generate]);
-
-  const approve = async () => {
-    if (!draft) return;
-    setApproving(true);
+    if (autoTried.current || planRow.loading || planRow.data || planRow.error || !project.data) return;
+    if (project.data.status !== "DATA_VALIDATED") return;
+    autoTried.current = true;
+    const key = `datrix:auto-plan:${id}`;
     try {
-      const cleaned: AnalysisPlan = {
-        ...draft,
-        steps: draft.steps.filter((s) => s.title.trim() || s.detail.trim()),
-        assumptions: draft.assumptions.filter((a) => a.trim()),
-        expected_outputs: draft.expected_outputs.filter((a) => a.trim()),
-      };
-      const run = await api.approvePlan(id, cleaned);
-      toast.success("Plan approved", "The analysis is running.");
-      router.push(`/projects/${id}/run?run=${run.id}`);
-    } catch (e) {
-      toast.error("Could not approve plan", errorMessage(e));
-      setApproving(false);
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, "1");
+    } catch {
+      /* storage blocked: the ref still limits this to once per mount */
     }
-  };
+    void generate();
+  }, [id, planRow.loading, planRow.data, planRow.error, project.data, generate]);
+
+  const approve = () =>
+    once(async () => {
+      if (!draft) return;
+      setApproving(true);
+      try {
+        const cleaned: AnalysisPlan = {
+          ...draft,
+          steps: draft.steps.filter((s) => s.title.trim() || s.detail.trim()),
+          assumptions: draft.assumptions.filter((a) => a.trim()),
+          expected_outputs: draft.expected_outputs.filter((a) => a.trim()),
+        };
+        const run = await api.approvePlan(id, cleaned);
+        toast.success("Plan approved", "The analysis is running.");
+        router.push(`/projects/${id}/run?run=${run.id}`);
+      } catch (e) {
+        toast.error("Could not approve plan", errorMessage(e));
+        setApproving(false);
+      }
+    });
 
   if (project.loading && !project.data) return <PageSkeleton />;
   if (!project.data) return <Alert variant="destructive" title="Could not load project">{project.error}</Alert>;

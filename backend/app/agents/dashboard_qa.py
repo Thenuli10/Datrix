@@ -17,6 +17,7 @@ class QAIssues(BaseModel):
 
 def review(llm: LLMClient, spec: DashboardSpec, screenshots: list[bytes], findings: list[DashboardIssue],
            pid: int | None) -> list[DashboardIssue]:
+    screenshots = screenshots[:settings.llm_max_images]
     if not screenshots:
         return []
     widgets = [{"id": w.id, "type": w.type, "title": w.title, "layout": w.layout.model_dump(), "tab": w.tab}

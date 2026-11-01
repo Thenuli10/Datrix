@@ -11,6 +11,7 @@ from app.core.db import get_session
 from app.models import Pipeline, Project, Run
 from app.services import orchestrator as orch
 from app.services.jobs import jobs
+from app.services.locks import project_lock
 
 router = APIRouter(prefix="/pipelines", tags=["pipelines"])
 
@@ -55,11 +56,11 @@ async def new_run(
     ends the run as FAILED with `contract_check_json` explaining why."""
     pipe = get_or_404(session, Pipeline, pipeline_id)
     project = get_or_404(session, Project, pipe.project_id)
-    ids = []
-    for f in files:
-        ds = orch.add_dataset(session, project, f.filename or "upload.csv", await f.read(), purpose="rerun")
-        ids.append(ds.id)
-    run = orch.rerun(session, pipe, ids, mode, data_mode, json.loads(mapping_override or "{}"))
+    orch.ensure_no_active_run(session, project.id)  # before storing uploads
+    blobs = [(f.filename or "upload.csv", await f.read()) for f in files]
+    with project_lock(project.id, "re-run start"):
+        ids = [orch.add_dataset(session, project, name, data, purpose="rerun").id for name, data in blobs]
+        run = orch.rerun(session, pipe, ids, mode, data_mode, json.loads(mapping_override or "{}"))
     jobs.submit(orch.execute_rerun, run.id)
     return run.model_dump(mode="json")
 
@@ -72,8 +73,10 @@ def retry_run(pipeline_id: int, run_id: int, body: dict[str, Any] | None = None,
     old = get_or_404(session, Run, run_id)
     opts = old.contract_check_json or {}
     mode = {"train": "retrain"}.get(old.mode, old.mode)
-    run = orch.rerun(session, pipe, old.dataset_ids, mode, (body or {}).get("data_mode", opts.get("data_mode", "replace")),
-                     (body or {}).get("mapping_override", opts.get("mapping_override")))
+    with project_lock(pipe.project_id, "re-run start"):
+        run = orch.rerun(session, pipe, old.dataset_ids, mode,
+                         (body or {}).get("data_mode", opts.get("data_mode", "replace")),
+                         (body or {}).get("mapping_override", opts.get("mapping_override")))
     jobs.submit(orch.execute_rerun, run.id)
     return run.model_dump(mode="json")
 
@@ -81,7 +84,9 @@ def retry_run(pipeline_id: int, run_id: int, body: dict[str, Any] | None = None,
 @router.post("/{pipeline_id}/automap")
 def automap(pipeline_id: int, body: dict[str, list[int]], session: Session = Depends(get_session)) -> dict[str, str]:
     """LLM-suggested column mapping for new files that failed the contract check."""
-    return orch.suggest_mapping(session, get_or_404(session, Pipeline, pipeline_id), body.get("dataset_ids", []))
+    pipe = get_or_404(session, Pipeline, pipeline_id)
+    with project_lock(pipe.project_id, "auto-mapping"):
+        return orch.suggest_mapping(session, pipe, body.get("dataset_ids", []))
 
 
 @router.post("/{pipeline_id}/fork")

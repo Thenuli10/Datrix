@@ -17,6 +17,7 @@ import type {
   Results,
   Run,
   RunWithKpis,
+  Usage,
   Validation,
 } from "./types";
 
@@ -59,6 +60,7 @@ function detailToMessage(detail: unknown, fallback: string): string {
 }
 
 export function errorMessage(err: unknown): string {
+  // The backend's `detail`, e.g. 402 "OpenAI budget cap reached: …" or 409 "Project 3 is busy …".
   if (err instanceof ApiError) return err.message;
   if (err instanceof TypeError) return `Cannot reach the backend at ${API_URL}. Is it running?`;
   if (err instanceof Error) return err.message;
@@ -191,6 +193,9 @@ export const api = {
   automap: (pid: number, datasetIds: number[]) =>
     request<Record<string, string>>(`/pipelines/${pid}/automap`, json({ dataset_ids: datasetIds })),
   forkPipeline: (pid: number) => request<{ project_id: number }>(`/pipelines/${pid}/fork`, { method: "POST" }),
+
+  /* ---------------- usage ---------------- */
+  getUsage: () => request<Usage>("/usage"),
 };
 
 /**

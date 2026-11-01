@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import type { Data } from "plotly.js";
 import { ExternalLink, GitFork, LayoutDashboard, Play, ScrollText, Wand2 } from "lucide-react";
 import { api, errorMessage } from "@/lib/api";
-import { useIdParam, useInterval, useLoad } from "@/lib/hooks";
+import { useIdParam, useInterval, useLoad, useSingleFlight } from "@/lib/hooks";
 import type { DataMode, Run, RunWithKpis, RerunMode } from "@/lib/types";
 import { formatDateTime, formatValue, plotlyHoverFormat, plotlyTickFormat, toNumber } from "@/lib/format";
 import { isRunActive } from "@/lib/utils";
@@ -203,6 +203,7 @@ export default function PipelinePage() {
   const [mapping, setMapping] = React.useState(false);
   const [retrying, setRetrying] = React.useState(false);
   const [forking, setForking] = React.useState(false);
+  const once = useSingleFlight();
 
   const pl = pipeline.data;
   const isML = pl?.path === "ml";
@@ -223,24 +224,27 @@ export default function PipelinePage() {
   }, [activeRun, runs, toast]);
   useInterval(() => void pollRun(), 2000, !!activeRun && isRunActive(activeRun.status));
 
-  const submit = async (e: React.FormEvent) => {
+  const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!pl || !files.length || !dataMode || (isML && !mode)) return;
-    setProgress(0);
-    try {
-      const r = await api.createPipelineRun(id, { files, mode: isML ? mode! : "script", data_mode: dataMode }, setProgress);
-      setActiveRun(r);
-      setFiles([]);
-      toast.info(`Run #${r.id} started`, "Checking the data contract first.");
-      void runs.reload();
-    } catch (err) {
-      toast.error("Could not start run", errorMessage(err));
-    } finally {
-      setProgress(null);
-    }
+    void once(async () => {
+      setProgress(0);
+      try {
+        const r = await api.createPipelineRun(id, { files, mode: isML ? mode! : "script", data_mode: dataMode }, setProgress);
+        setActiveRun(r);
+        setFiles([]);
+        toast.info(`Run #${r.id} started`, "Checking the data contract first.");
+        void runs.reload();
+      } catch (err) {
+        toast.error("Could not start run", errorMessage(err));
+      } finally {
+        setProgress(null);
+      }
+    });
   };
 
-  const doAutomap = async () => {
+  const doAutomap = () => once(automapNow);
+  const automapNow = async () => {
     if (!activeRun) return;
     setMapping(true);
     try {
@@ -262,7 +266,8 @@ export default function PipelinePage() {
     }
   };
 
-  const retry = async () => {
+  const retry = () => once(retryNow);
+  const retryNow = async () => {
     if (!activeRun) return;
     setRetrying(true);
     try {
