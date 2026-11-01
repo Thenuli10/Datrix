@@ -1,0 +1,161 @@
+@import "tailwindcss";
+
+/* Class-based dark mode: <html class="dark"> (set by the theme script in app/layout.tsx). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --muted: #f1f5f9;
+  --muted-foreground: #475569;
+  --border: #e2e8f0;
+  --input: #cbd5e1;
+  --primary: #3554c4;
+  --primary-foreground: #ffffff;
+  --accent: #eef2ff;
+  --accent-foreground: #1e3a8a;
+  --destructive: #c42b2b;
+  --destructive-foreground: #ffffff;
+  --success: #15803d;
+  --warning: #a35c00;
+  --info: #1d63c9;
+  --ring: #4f6fe0;
+  color-scheme: light;
+}
+
+.dark {
+  --background: #0b1020;
+  --foreground: #e6e9f2;
+  --card: #121a2e;
+  --card-foreground: #e6e9f2;
+  --muted: #1a2338;
+  --muted-foreground: #a4adc2;
+  --border: #253050;
+  --input: #34406a;
+  --primary: #7b93ff;
+  --primary-foreground: #0b1020;
+  --accent: #1c2747;
+  --accent-foreground: #c7d2fe;
+  --destructive: #f07070;
+  --destructive-foreground: #0b1020;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --info: #7ab4ff;
+  --ring: #8ea2ff;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-ring: var(--ring);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* ---------------- Dashboard grid (12 columns, row ≈ 80px) ---------------- */
+.dash-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: 80px;
+  gap: 16px;
+}
+.dash-cell {
+  grid-column: 1 / -1;
+  grid-row: span var(--h);
+  min-width: 0;
+  min-height: 0;
+}
+@media (min-width: 768px) {
+  .dash-grid {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+  .dash-cell {
+    grid-column: var(--gc);
+    grid-row: var(--gr);
+  }
+}
+
+/* Plotly: keep modebar unobtrusive and readable in dark mode */
+.js-plotly-plot .plotly .modebar,
+.js-plotly-plot .plotly .modebar-group {
+  background: transparent !important;
+}
+/* Touch devices: no hover, so hide the toolbar instead of leaving it on top of the chart */
+@media (hover: none) {
+  .js-plotly-plot .plotly .modebar-container {
+    display: none !important;
+  }
+}
+.dark .js-plotly-plot .plotly .modebar-btn path {
+  fill: #a4adc2 !important;
+}
+
+/* Markdown content */
+.prose-dx {
+  font-size: 0.925rem;
+  line-height: 1.6;
+}
+.prose-dx h1,
+.prose-dx h2,
+.prose-dx h3 {
+  font-weight: 600;
+  margin: 0.9em 0 0.4em;
+  line-height: 1.3;
+}
+.prose-dx h1 { font-size: 1.15rem; }
+.prose-dx h2 { font-size: 1.05rem; }
+.prose-dx h3 { font-size: 0.975rem; }
+.prose-dx p { margin: 0.45em 0; }
+.prose-dx ul { list-style: disc; padding-left: 1.25rem; margin: 0.45em 0; }
+.prose-dx ol { list-style: decimal; padding-left: 1.25rem; margin: 0.45em 0; }
+.prose-dx li { margin: 0.2em 0; }
+.prose-dx strong { font-weight: 600; }
+.prose-dx code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--muted);
+  padding: 0.1em 0.3em;
+  border-radius: 4px;
+}
+.prose-dx a { color: var(--primary); text-decoration: underline; }
+.prose-dx table { border-collapse: collapse; margin: 0.5em 0; font-size: 0.85rem; }
+.prose-dx th, .prose-dx td { border: 1px solid var(--border); padding: 0.25em 0.5em; }
+.prose-dx > :first-child { margin-top: 0; }

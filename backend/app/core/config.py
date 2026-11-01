@@ -1,6 +1,7 @@
 """Application settings, loaded from environment / backend/.env."""
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -48,6 +49,12 @@ class Settings(BaseSettings):
     compare_metric_drop: float = 0.05
 
     cors_origins: list[str] = ["http://localhost:3000"]
+
+    @field_validator("storage_dir")
+    @classmethod
+    def _absolute(cls, v: Path) -> Path:
+        # Stored file paths and Docker bind mounts need absolute paths.
+        return v.expanduser().resolve()
 
     @property
     def db_url(self) -> str:

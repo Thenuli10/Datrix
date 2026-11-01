@@ -50,3 +50,9 @@ cd frontend && npm run build && npm run lint
 ```
 
 Tests use a fake LLM (`LLM_FAKE=true`), so they never call OpenAI.
+
+## Offline demo
+
+`.claude/launch.json` has a `backend-demo` config: fake LLM, local sandbox, data in `storage/demo`.
+It exercises the whole UI flow without an API key or Docker, but the fake LLM returns placeholder
+specs and plans, so the dashboards it produces are minimal.
