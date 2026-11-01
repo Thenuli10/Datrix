@@ -44,6 +44,9 @@ DOM_CHECKS_JS = """
       if (!el.childNodes.length || ![...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim())) return;
       const cs = getComputedStyle(el);
       if (cs.visibility === 'hidden' || cs.display === 'none') return;
+      // Visually hidden on purpose (e.g. sr-only labels for screen readers): not cut off.
+      const box = el.getBoundingClientRect();
+      if (box.width <= 1 || box.height <= 1 || cs.clip === 'rect(0px, 0px, 0px, 0px)') return;
       const size = parseFloat(cs.fontSize);
       if (size && size < 11) add(id, 'small_text', 'low', `Text is ${size}px (< 11px)`);
       if (cs.textOverflow !== 'ellipsis' && el.scrollWidth > el.clientWidth + 2 && cs.overflow === 'hidden')

@@ -145,3 +145,17 @@ def test_prepare_inputs_first_run_and_rerun(tmp_path):
 def test_canonical_name():
     assert canonical_name("Sales Q1 (final).CSV") == "sales_q1_final"
     assert canonical_name("2024.csv") == "d_2024"
+
+
+def test_append_keeps_genuine_repeats_and_drops_only_overlap():
+    """A live run lost 5 legitimate identical order lines when append deduplicated old + new together."""
+    import pandas as pd
+
+    from app.services.contract import append_datasets
+    old = pd.DataFrame({"order_id": ["A", "A", "B"], "revenue": [10.0, 10.0, 5.0]})  # A is repeated on purpose
+    new = pd.DataFrame({"order_id": ["B", "C", "C"], "revenue": [5.0, 7.0, 7.0]})   # B overlaps; C repeated
+    (merged,) = append_datasets([old], [new])
+    assert merged["order_id"].tolist() == ["A", "A", "B", "C", "C"]
+    # Re-uploading exactly the old data adds nothing.
+    (same,) = append_datasets([old], [old.copy()])
+    assert len(same) == 3

@@ -154,6 +154,18 @@ def test_full_flow(client: TestClient):
     r4 = _wait(client, r4["id"])
     assert r4["status"] == "COMPLETED", r4["contract_check_json"]
 
+    # Append a small top-up (below min_rows=5 on its own): the minimum applies to the combined data.
+    tiny = "order_date,Region,Amount\n2026-08-01,North,11\n2026-08-02,South,12"
+    r5 = client.post(f"/pipelines/{pipe_id}/runs", data={"mode": "script", "data_mode": "append"},
+                     files=[("files", ("tiny.csv", tiny, "text/csv"))]).json()
+    r5 = _wait(client, r5["id"])
+    assert r5["status"] == "COMPLETED", r5.get("error") or r5["contract_check_json"]
+    # …but the same file alone in replace mode is too small.
+    r6 = client.post(f"/pipelines/{pipe_id}/runs", data={"mode": "script", "data_mode": "replace"},
+                     files=[("files", ("tiny.csv", tiny, "text/csv"))]).json()
+    r6 = _wait(client, r6["id"])
+    assert r6["status"] == "FAILED" and any(i["kind"] == "too_few_rows" for i in r6["contract_check_json"]["issues"])
+
     history = client.get(f"/pipelines/{pipe_id}/runs").json()
-    assert len(history) == 4 and history[0]["kpis"]
+    assert len(history) == 6 and history[-1]["kpis"]
     assert client.get(f"/projects/{pid}").json()["status"] == "COMPLETED"

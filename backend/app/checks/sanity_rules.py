@@ -297,8 +297,31 @@ def run_layer1(results: Results, input_rows: int, input_date_range: DateRange | 
 
 # ---------------------------------------------------------------- Layer 2
 
+def _same_x(x: Any, target: str) -> bool:
+    """Exact label match, else the same date (month-level when either side is a 'YYYY-MM' label)."""
+    if str(x) == target:
+        return True
+    a, b = _parse_date(x), _parse_date(target)
+    if a is None or b is None:
+        return False
+    if len(str(x)) == 7 or len(target) == 7:
+        return (a.year, a.month) == (b.year, b.month)
+    return a == b
+
+
+def _series_value(results: Results, key: str, target: str) -> float | None:
+    s = next((s for s in results.series if s.key == key), None)
+    if s is None:
+        return None
+    val = next((y for x, y in zip(s.x, s.y) if _same_x(x, target)), None)
+    return float(val) if is_number(val) and not is_bad(val) else None
+
+
 def resolve_ref(results: Results, ref: str) -> float | None:
-    """Resolve 'summary.x', 'kpis.<key>', 'tables.<key>.<row>.<col>', 'model.metrics.<name>'."""
+    """Resolve 'summary.x', 'kpis.<key>', 'tables.<key>.<row>.<col>', 'model.metrics.<name>',
+    'series.<key>.<x>' (also 'series.<key>[<x>]')."""
+    if m := re.fullmatch(r"series\.([^.\[]+)(?:\.|\[)(.+?)\]?", ref):
+        return _series_value(results, m.group(1), m.group(2))
     parts = ref.split(".")
     head, rest = parts[0], parts[1:]
     val: Any = None

@@ -128,7 +128,7 @@ def _suggest(missing: str, available: Sequence[str], taken: set[str]) -> str | N
 
 
 def check_contract(contract: DataContract, datasets: Datasets,
-                   mapping_override: dict[str, str] | None = None) -> ContractCheckResult:
+                   mapping_override: dict[str, str] | None = None, min_rows: int | None = None) -> ContractCheckResult:
     """Check new uploads against the frozen contract.
 
     `mapping_override` maps a contract source column (or canonical name) to the column name in the new file.
@@ -142,10 +142,12 @@ def check_contract(contract: DataContract, datasets: Datasets,
                                             f"({', '.join(contract.files)}), got {len(datasets)}."))
     order = _match_files(contract, datasets)
 
+    # `min_rows` overrides the contract's minimum, e.g. 0 in append mode where the combined data is checked later.
+    need = contract.min_rows if min_rows is None else min_rows
     rows = [len(datasets[i][1]) for i in order if i is not None]
-    if rows and max(rows) < contract.min_rows:
+    if rows and max(rows) < need:
         issues.append(ContractIssue(severity="error", kind="too_few_rows",
-                                    message=f"Only {max(rows)} rows; at least {contract.min_rows} are needed."))
+                                    message=f"Only {max(rows)} rows; at least {need} are needed."))
 
     for col in contract.columns:
         pos = order[col.dataset_index] if col.dataset_index < len(order) else None
@@ -219,15 +221,31 @@ def apply_mapping(contract: DataContract, datasets: Datasets,
 
 
 def append_datasets(old_dfs: Sequence[pd.DataFrame], new_dfs: Sequence[pd.DataFrame]) -> list[pd.DataFrame]:
-    """Re-run "append" mode: concat each old/new pair (canonical columns) and drop duplicate rows."""
+    """Re-run "append" mode: old rows plus the new rows not already in the old data.
+
+    Only overlap with the old data is dropped (e.g. re-uploading a period that is already there), counted per
+    occurrence. Identical rows that are genuinely repeated (two equal order lines) are kept: deduplicating the
+    whole frame silently lost rows in a live run.
+    """
     out: list[pd.DataFrame] = []
     for i in range(max(len(old_dfs), len(new_dfs))):
-        parts = [d for d in (old_dfs[i] if i < len(old_dfs) else None, new_dfs[i] if i < len(new_dfs) else None)
-                 if d is not None and len(d.columns)]
-        merged = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
-        try:
-            merged = merged.drop_duplicates(ignore_index=True)
-        except TypeError:  # unhashable cells (lists/dicts from JSON)
-            merged = merged.loc[~merged.astype(str).duplicated()].reset_index(drop=True)
-        out.append(merged)
+        old = old_dfs[i] if i < len(old_dfs) else None
+        new = new_dfs[i] if i < len(new_dfs) else None
+        if old is None or not len(old.columns):
+            out.append(new.reset_index(drop=True) if new is not None else pd.DataFrame())
+            continue
+        if new is None or not len(new.columns):
+            out.append(old.reset_index(drop=True))
+            continue
+        new = new.reindex(columns=old.columns)
+        old_counts = _row_keys(old).value_counts()
+        keys = _row_keys(new)
+        occurrence = keys.groupby(keys).cumcount()
+        fresh = new.loc[(occurrence >= keys.map(old_counts).fillna(0)).to_numpy()]
+        out.append(pd.concat([old, fresh], ignore_index=True))
     return out
+
+
+def _row_keys(df: pd.DataFrame) -> pd.Series:
+    """One comparable string per row (works for unhashable JSON cells and mixed dtypes)."""
+    return df.astype(str).agg("\x1f".join, axis=1)

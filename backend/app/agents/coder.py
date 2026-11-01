@@ -115,8 +115,14 @@ def generate_spot_check(llm: LLMClient, plan: AnalysisPlan, results: Results | d
     """Source of `def spot_check(input_dir: str) -> list[dict]` recomputing 2-3 key numbers with pandas."""
     user = (f"## Approved plan\n{to_json(plan)}\n\n## input_dir/manifest.json\n{to_json(manifest)}\n\n"
             f"## results.json (digest)\n{to_json(_results_digest(results))}")
-    return strip_code_fences(llm.text(agent="coder_spot_check", system=system_prompt("coder_spot_check"),
+    code = strip_code_fences(llm.text(agent="coder_spot_check", system=system_prompt("coder_spot_check"),
                                       user=user, project_id=pid))
+    if "results.json" in code:  # it cannot read results at run time; one corrective retry
+        user += ("\n\n## Your previous script opened results.json, which does not exist in input_dir. Rewrite it "
+                 "to recompute the numbers from the parquet files only and always return them.")
+        code = strip_code_fences(llm.text(agent="coder_spot_check", system=system_prompt("coder_spot_check"),
+                                          user=user, project_id=pid))
+    return code
 
 
 @dataclass

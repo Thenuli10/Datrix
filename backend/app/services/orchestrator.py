@@ -376,7 +376,11 @@ def _compose_dashboard(ctx: RunContext, run_id: int, run_dir: Path, results: Res
                        quick: bool = False) -> tuple[DashboardSpec, DashboardQAReport]:
     """Composer → rule checks → screenshot + vision review → fix loop (§7b)."""
     llm = get_llm()
-    spec = previous if (quick and previous) else composer.compose(llm, results, plan, project_id)
+    if quick and previous:
+        spec = previous
+    else:
+        spec = _cosmetic(ctx, "composer", lambda: composer.compose(llm, results, plan, project_id),
+                         lambda: composer.default_spec(results, plan.title))
     all_issues: list[DashboardIssue] = []
     shots: list[str] = []
     rounds = 0
@@ -395,18 +399,33 @@ def _compose_dashboard(ctx: RunContext, run_id: int, run_dir: Path, results: Res
             paths, dom_issues = screenshot.capture(run_id, run_dir / "screenshots")
             shots = [str(p) for p in paths]
             if paths:
-                vision = dashboard_qa.review(llm, spec, [p.read_bytes() for p in paths],
-                                             rule_issues + dom_issues, project_id)
+                vision = _cosmetic(ctx, "dashboard vision review", lambda: dashboard_qa.review(
+                    llm, spec, [p.read_bytes() for p in paths], rule_issues + dom_issues, project_id), list)
             vision = dom_issues + vision
         all_issues += vision
         open_issues += [i for i in vision if i.severity in ("high", "medium")]
         if not open_issues or rounds > settings.max_dashboard_qa_rounds:
             break
         ctx.log(f"[dashboard] {len(open_issues)} issue(s); asking the composer to fix")
-        spec = composer.compose(llm, results, plan, project_id, qa_issues=open_issues, previous=spec)
+        fixed = _cosmetic(ctx, "composer fix", lambda: composer.compose(
+            llm, results, plan, project_id, qa_issues=open_issues, previous=spec), lambda: None)
+        if fixed is None:
+            break  # keep the rule-checked spec we have
+        spec = fixed
     worst = {i.severity for i in all_issues if not i.auto_fixed}
     status = "fail" if "high" in worst else "warn" if "medium" in worst else "pass"
     return spec, DashboardQAReport(status=status, issues=all_issues, rounds=rounds, screenshots=shots)
+
+
+def _cosmetic(ctx: RunContext, what: str, call: Callable[[], Any], fallback: Callable[[], Any]) -> Any:
+    """Dashboard and insights steps must never fail a run whose results are already checked (§13):
+    on any error (incl. a spend cap) use the free, deterministic fallback."""
+    try:
+        return call()
+    except Exception as e:  # noqa: BLE001
+        log.warning("%s failed, using fallback: %s", what, e)
+        ctx.log(f"[warn] {what} failed ({type(e).__name__}: {str(e)[:200]}); using fallback")
+        return fallback()
 
 
 def _write_json(path: Path, data: Any) -> None:
@@ -578,7 +597,8 @@ def _execute_first_run(run_id: int, ctx: RunContext) -> None:
     ctx.stage("Composing dashboard", RunStatus.CHECKING)
     dash, qa = _compose_dashboard(ctx, run_id, run_dir, results, plan, pid)
     ctx.stage("Writing insights")
-    md = insights.write(llm, requirement, results, pid)
+    md = _cosmetic(ctx, "insights", lambda: insights.write(llm, requirement, results, pid),
+                   lambda: _quick_insights(results))
     with _session() as s:
         pipe = s.get(Pipeline, pipeline_id)
         pipe.dashboard_spec_json = dash.model_dump()
@@ -657,7 +677,10 @@ def _execute_rerun(run_id: int, ctx: RunContext) -> None:
 
     ctx.stage("Checking data contract", RunStatus.RUNNING)
     frames = [(d.original_name, _load_df(d)) for d in new_ds]
-    check: ContractCheckResult = contract_svc.check_contract(contract, frames, override)
+    appending = prev_input is not None and (prev_input / "manifest.json").exists()
+    # Appending: a small top-up file is fine; the minimum row count applies to the combined data below.
+    check: ContractCheckResult = contract_svc.check_contract(contract, frames, override,
+                                                             min_rows=0 if appending else None)
     check_json = check.model_dump() | {"data_mode": data_mode, "mapping_override": override or {}}
     with _session() as s:
         r = s.get(Run, run_id)
@@ -670,11 +693,13 @@ def _execute_rerun(run_id: int, ctx: RunContext) -> None:
         return _fail(run_id, ctx, "New data does not match the pipeline's data contract.")
 
     canon = contract_svc.apply_mapping(contract, frames, override)
-    if prev_input and (prev_input / "manifest.json").exists():
+    if appending:
         prev_manifest = json.loads((prev_input / "manifest.json").read_text(encoding="utf-8"))
         old = [pd.read_parquet(prev_input / f["path"]) for f in prev_manifest["files"]]
         canon = contract_svc.append_datasets(old, canon)
-        ctx.log(f"[data] appended to previous data: {sum(len(df) for df in canon)} rows")
+        ctx.log(f"[data] appended to previous data: {' + '.join(str(len(df)) for df in canon)} rows per file")
+        if max(len(df) for df in canon) < contract.min_rows:
+            return _fail(run_id, ctx, f"Combined data has fewer than {contract.min_rows} rows.")
     input_dir = run_dir / "input"
     prepare_inputs(list(zip(contract.files, canon)), None, contract.joins, input_dir, contract=contract)
     manifest, canon_profiles = _canonical_profiles(input_dir)
@@ -759,7 +784,8 @@ def _execute_rerun(run_id: int, ctx: RunContext) -> None:
 
     ctx.stage("Refreshing dashboard", RunStatus.CHECKING)
     dash, qa = _compose_dashboard(ctx, run_id, run_dir, results, plan, pid, previous=dash_spec, quick=True)
-    md = insights.write(get_llm(), requirement, results, pid) if flagged or llm_report else _quick_insights(results)
+    md = (_cosmetic(ctx, "insights", lambda: insights.write(get_llm(), requirement, results, pid),
+                    lambda: _quick_insights(results)) if flagged or llm_report else _quick_insights(results))
     _finish_run(run_id, status=RunStatus.COMPLETED, stage="Completed", dashboard_qa_json=qa.model_dump(),
                 insights_md=md, thumbnail_path=qa.screenshots[0] if qa.screenshots else None)
     ctx.log("[done] re-run complete")

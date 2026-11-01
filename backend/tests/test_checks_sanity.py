@@ -164,3 +164,14 @@ def test_spot_check_wrong_total():
 def test_summarize_low_only_passes():
     rep = summarize([SanityIssue(severity="low", check="x", message="m")], 3, 2)
     assert rep.status == "pass" and rep.checks_run == 3 and rep.checks_passed == 2
+
+
+def test_resolve_series_refs():
+    """Spot-checks may point at a series point; month labels match month-start dates (seen in a live run)."""
+    from app.checks.sanity_rules import resolve_ref
+    r = Results.model_validate({"summary": {"title": "t", "rows_processed": 1}, "series": [
+        {"key": "monthly_revenue", "x": ["2026-01", "2026-02"], "y": [10.0, 20.0]}]})
+    assert resolve_ref(r, "series.monthly_revenue.2026-02") == 20.0
+    assert resolve_ref(r, "series.monthly_revenue[2026-01-01]") == 10.0
+    assert resolve_ref(r, "series.monthly_revenue.2026-03") is None
+    assert resolve_ref(r, "series.missing.2026-01") is None
