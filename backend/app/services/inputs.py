@@ -18,7 +18,7 @@ import pandas as pd
 
 from app.schemas.data import ColumnMapping, DataContract, JoinSpec
 from app.schemas.requirement import DataSpec
-from app.services.contract import resolve_dataset_index
+from app.services.contract import build_frame, passthrough_sources, resolve_dataset_index
 from app.services.profiler import coerce_series, infer_type
 
 MANIFEST = "manifest.json"
@@ -60,8 +60,9 @@ def prepare_inputs(datasets: Sequence[DatasetItem], mapping: Sequence[ColumnMapp
     """Write `<name>.parquet` per dataset and manifest.json into `out_dir`; returns `out_dir`.
 
     First run: `datasets` are raw `(file_name, df)` and `mapping` is the validation mapping
-    (dataset ids resolved via `dataset_ids` or upload order); only mapped columns and join keys are
-    kept, renamed to canonical names. Re-run: pass `mapping=None`, frames already canonical (from
+    (dataset ids resolved via `dataset_ids` or upload order); mapped columns and join keys are renamed to
+    canonical names (several sources for one name are combined), other columns pass through under
+    snake_case names. Re-run: pass `mapping=None`, frames already canonical (from
     `contract.apply_mapping` / `append_datasets`) and the `contract`, whose file names and
     index-based joins are used so names stay stable across runs.
     """
@@ -105,8 +106,9 @@ def prepare_inputs(datasets: Sequence[DatasetItem], mapping: Sequence[ColumnMapp
     columns: dict[str, dict[str, str]] = {}
     for i, ((_, df), name) in enumerate(zip(pairs, names)):
         if mapping is not None:
-            cols = {src: canon for (p, src), canon in renames.items() if p == i and src in df.columns}
-            frame = pd.DataFrame({canon: df[src] for src, canon in cols.items()}, index=df.index)
+            sources = [(src, canon) for (p, src), canon in renames.items() if p == i]
+            taken = set(renames.values())
+            frame = build_frame(df, sources + passthrough_sources(df, {s for s, _ in sources}, taken))
         else:
             frame = df.copy()
         frame = frame.reset_index(drop=True)

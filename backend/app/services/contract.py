@@ -38,6 +38,46 @@ def _norm(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
+def snake(name: str) -> str:
+    """Identifier-safe column name for passed-through extra columns: 'Direction 1' -> 'direction_1'."""
+    out = re.sub(r"[^a-z0-9]+", "_", str(name).lower()).strip("_") or "col"
+    return f"c_{out}" if out[0].isdigit() else out
+
+
+def combine_sources(parts: Sequence[pd.Series]) -> pd.Series:
+    """One canonical column from several source columns (the validator may map e.g. a date column and an
+    hour-of-day column to one `timestamp`). Date + integer hour 0-23 → datetime; date + time text →
+    datetime; anything else → the values joined with a space."""
+    if len(parts) == 1:
+        return parts[0]
+    kinds = [infer_type(p) for p in parts]
+    date_i = next((i for i, k in enumerate(kinds) if k in ("date", "datetime")), None)
+    if date_i is not None and len(parts) == 2:
+        date, other = parts[date_i], parts[1 - date_i]
+        base = pd.to_datetime(date, errors="coerce")
+        num = pd.to_numeric(other, errors="coerce")
+        if num.notna().mean() > 0.95 and num.dropna().between(0, 23).all():
+            return base.dt.normalize() + pd.to_timedelta(num, unit="h")
+        joined = pd.to_datetime(date.astype(str) + " " + other.astype(str), errors="coerce")
+        if joined.notna().mean() > 0.95:
+            return joined
+    out = parts[0].astype(str)
+    for p in parts[1:]:
+        out = out + " " + p.astype(str)
+    return out
+
+
+def build_frame(df: pd.DataFrame, sources: Sequence[tuple[str, str]]) -> pd.DataFrame:
+    """Frame of canonical columns from (source column, canonical name) pairs; several sources for one
+    canonical name are combined (assigning them one by one would silently keep only the last)."""
+    groups: dict[str, list[str]] = {}
+    for src, canon in sources:
+        if src in df.columns and src not in groups.setdefault(canon, []):
+            groups[canon].append(src)
+    return pd.DataFrame({canon: combine_sources([df[s] for s in srcs]) for canon, srcs in groups.items() if srcs},
+                        index=df.index)
+
+
 def resolve_dataset_index(m: ColumnMapping, datasets: Datasets, dataset_ids: Sequence[int] | None,
                           all_ids: Sequence[int]) -> int:
     """Position in `datasets` of the file a mapping (by DB dataset_id) refers to.
@@ -103,8 +143,32 @@ def freeze_contract(datasets: Datasets, report: ValidationReport, spec: DataSpec
                 columns.append(ContractColumn(name=key, source_column=key, dataset_index=idx,
                                               type=infer_type(df[key]),
                                               nullable_pct=round(100.0 * df[key].isna().mean(), 2)))
+    columns += _passthrough_columns(datasets, columns)
     return DataContract(files=[name for name, _ in datasets], columns=columns, joins=joins,
                         min_rows=spec.min_rows)
+
+
+def passthrough_sources(df: pd.DataFrame, used: set[str], taken: set[str]) -> list[tuple[str, str]]:
+    """(source, snake_name) for columns the mapping did not use: kept so the analysis can use extras."""
+    out: list[tuple[str, str]] = []
+    for c in df.columns:
+        name = snake(c)
+        if c in used or name in taken:
+            continue
+        taken.add(name)
+        out.append((c, name))
+    return out
+
+
+def _passthrough_columns(datasets: Datasets, mapped: list[ContractColumn]) -> list[ContractColumn]:
+    extra: list[ContractColumn] = []
+    taken = {c.name for c in mapped}
+    for idx, (_, df) in enumerate(datasets):
+        used = {c.source_column for c in mapped if c.dataset_index == idx}
+        for src, name in passthrough_sources(df, used, taken):
+            extra.append(ContractColumn(name=name, source_column=src, dataset_index=idx, type=infer_type(df[src]),
+                                        nullable_pct=round(100.0 * df[src].isna().mean(), 2), required=False))
+    return extra
 
 
 def _match_files(contract: DataContract, datasets: Datasets) -> list[int | None]:
@@ -159,7 +223,8 @@ def check_contract(contract: DataContract, datasets: Datasets,
             taken = {_source(c, override) for c in contract.columns if c.dataset_index == col.dataset_index}
             if hint := _suggest(col.source_column, list(df.columns), taken):
                 suggested[col.source_column] = hint
-            issues.append(ContractIssue(severity="error", column=col.name, kind="missing_column",
+            issues.append(ContractIssue(severity="error" if col.required else "warning", column=col.name,
+                                        kind="missing_column",
                                         message=f"Column '{src}' (for '{col.name}') is missing"
                                                 + (f"; did you mean '{hint}'?" if hint else ".")))
             continue
@@ -214,8 +279,7 @@ def apply_mapping(contract: DataContract, datasets: Datasets,
             out.append(pd.DataFrame(columns=[c.name for c in cols]))
             continue
         df = datasets[pos][1]
-        present = [c for c in cols if _source(c, override) in df.columns]
-        frame = pd.DataFrame({c.name: df[_source(c, override)] for c in present}, index=df.index)
+        frame = build_frame(df, [(_source(c, override), c.name) for c in cols])
         out.append(frame.reset_index(drop=True))
     return out
 

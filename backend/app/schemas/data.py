@@ -70,6 +70,8 @@ class ContractColumn(BaseModel):
     min: float | None = None
     max: float | None = None
     categories: list[str] | None = None  # for low-cardinality string columns
+    # False for extra columns passed through unmapped: missing on a re-run is a warning, not an error.
+    required: bool = True
 
 
 class DataContract(BaseModel):

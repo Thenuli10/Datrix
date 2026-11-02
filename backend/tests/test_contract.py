@@ -65,7 +65,7 @@ def test_missing_column_suggestion_and_override(contract):
     # the user (or auto-map) remaps the contract source column to the new name
     assert check_contract(contract, [("o.csv", df)], {"Amt": "AMT"}).ok
     mapped = apply_mapping(contract, [("o.csv", df)], {"Amt": "AMT"})[0]
-    assert list(mapped.columns) == ["order_id", "amount", "region", "order_date"]
+    assert list(mapped.columns) == ["order_id", "amount", "region", "order_date", "extra"]  # unmapped extra passes through
 
 
 def test_type_mismatch_and_int_to_float_ok(contract):
@@ -124,7 +124,7 @@ def test_prepare_inputs_first_run_and_rerun(tmp_path):
     out = prepare_inputs(datasets, report.mapping, report.joins, tmp_path / "in1", dataset_ids=[11, 12], spec=SPEC)
     manifest = json.loads((out / "manifest.json").read_text())
     assert [f["name"] for f in manifest["files"]] == ["orders_2024", "customers"]
-    assert manifest["files"][0]["columns"] == ["order_id", "amount", "region", "order_date", "CustID"]
+    assert manifest["files"][0]["columns"] == ["order_id", "amount", "region", "order_date", "CustID", "extra"]
     assert manifest["joins"] == [{"left": "orders_2024", "right": "customers", "left_key": "CustID",
                                   "right_key": "CustID", "how": "left"}]
     assert manifest["columns"]["order_date"] == {"type": "date", "description": "Order date"}

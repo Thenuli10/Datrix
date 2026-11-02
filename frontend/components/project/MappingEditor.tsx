@@ -1,6 +1,6 @@
 "use client";
 import * as React from "react";
-import { Save, Undo2 } from "lucide-react";
+import { Plus, Save, Undo2, X } from "lucide-react";
 import type { ColumnMapping, DataSpec, Dataset } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,11 +9,16 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 
+const emptyRow = (spec_column: string): ColumnMapping => ({ spec_column, dataset_id: 0, source_column: "", transform: "" });
+
+/** One row per (spec column, source column). Several rows for one spec column are combined by the backend
+ *  (e.g. a date column + an hour column → one timestamp), so every source must be kept, not just the last. */
 function initialRows(spec: DataSpec, mapping: ColumnMapping[]): ColumnMapping[] {
-  const byCol = new Map(mapping.map((m) => [m.spec_column, m]));
-  const rows = spec.columns.map(
-    (c) => byCol.get(c.name) ?? { spec_column: c.name, dataset_id: 0, source_column: "", transform: "" },
-  );
+  const rows: ColumnMapping[] = [];
+  for (const c of spec.columns) {
+    const own = mapping.filter((m) => m.spec_column === c.name);
+    rows.push(...(own.length ? own : [emptyRow(c.name)]));
+  }
   // keep mappings for columns no longer in the spec, too
   for (const m of mapping) if (!spec.columns.some((c) => c.name === m.spec_column)) rows.push(m);
   return rows;
@@ -45,8 +50,14 @@ export function MappingEditor({
 
   const update = (i: number, patch: Partial<ColumnMapping>) =>
     setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const addSource = (i: number) =>
+    setRows((rs) => [...rs.slice(0, i + 1), { ...emptyRow(rs[i].spec_column), dataset_id: rs[i].dataset_id }, ...rs.slice(i + 1)]);
+  const removeRow = (i: number) => setRows((rs) => rs.filter((_, j) => j !== i));
+  const sourcesOf = (name: string) => rows.filter((r) => r.spec_column === name).length;
 
-  const missingRequired = rows.filter((r) => specCol(r.spec_column)?.required && !r.source_column).length;
+  const missingRequired = spec.columns.filter(
+    (c) => c.required && !rows.some((r) => r.spec_column === c.name && r.source_column),
+  ).length;
 
   return (
     <Card>
@@ -55,6 +66,7 @@ export function MappingEditor({
           <CardTitle>Column mapping</CardTitle>
           <CardDescription>
             Which of your columns fills each column of the spec. Fix anything the validator got wrong, then save.
+            Map several columns to one spec column to combine them (e.g. a date and an hour into a timestamp).
             {missingRequired > 0 && ` ${missingRequired} required column${missingRequired === 1 ? " is" : "s are"} unmapped.`}
           </CardDescription>
         </div>
@@ -80,6 +92,7 @@ export function MappingEditor({
               <TH>File</TH>
               <TH>Your column</TH>
               <TH className="hidden md:table-cell">Transform note</TH>
+              <TH className="w-20"><span className="sr-only">Actions</span></TH>
             </TR>
           </THead>
           <TBody>
@@ -87,15 +100,22 @@ export function MappingEditor({
               const sc = specCol(r.spec_column);
               const cols = columnsOf(r.dataset_id);
               const idBase = `map-${i}`;
+              const first = i === 0 || rows[i - 1].spec_column !== r.spec_column;
+              const combined = sourcesOf(r.spec_column) > 1;
               return (
-                <TR key={r.spec_column}>
+                <TR key={idBase}>
                   <TD className="min-w-36">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <code className="text-xs font-medium">{r.spec_column}</code>
-                      {sc && <Badge variant="secondary">{sc.type}</Badge>}
-                      {sc && !sc.required && <Badge variant="outline">optional</Badge>}
-                      {!sc && <Badge variant="warning">not in spec</Badge>}
-                    </div>
+                    {first ? (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <code className="text-xs font-medium">{r.spec_column}</code>
+                        {sc && <Badge variant="secondary">{sc.type}</Badge>}
+                        {sc && !sc.required && <Badge variant="outline">optional</Badge>}
+                        {!sc && <Badge variant="warning">not in spec</Badge>}
+                        {combined && <Badge variant="outline">combined</Badge>}
+                      </div>
+                    ) : (
+                      <span className="pl-3 text-xs text-muted-foreground">+ combined with</span>
+                    )}
                   </TD>
                   <TD className="min-w-40">
                     <label htmlFor={`${idBase}-ds`} className="sr-only">
@@ -145,6 +165,20 @@ export function MappingEditor({
                       onChange={(e) => update(i, { transform: e.target.value })}
                       placeholder="e.g. parse as date dd/mm/yyyy"
                     />
+                  </TD>
+                  <TD className="w-20 whitespace-nowrap text-right">
+                    {r.source_column && (
+                      <Button variant="ghost" size="icon" aria-label={`Add another source column for ${r.spec_column}`}
+                        title="Combine with another column" onClick={() => addSource(i)}>
+                        <Plus />
+                      </Button>
+                    )}
+                    {!first && (
+                      <Button variant="ghost" size="icon" aria-label={`Remove this source for ${r.spec_column}`}
+                        title="Remove this source" onClick={() => removeRow(i)}>
+                        <X />
+                      </Button>
+                    )}
                   </TD>
                 </TR>
               );
