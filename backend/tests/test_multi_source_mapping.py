@@ -59,3 +59,16 @@ def test_contract_rerun_uses_same_combination_and_extras_are_optional():
     assert check.ok and any(i.kind == "missing_column" and i.severity == "warning" for i in check.issues)
     without_hour = RAW.drop(columns=["hourday"])
     assert not check_contract(contract, [("ped.csv", without_hour)]).ok
+
+
+def test_rerun_inputs_keep_combined_timestamp_as_datetime(tmp_path):
+    """Live re-run failure: prepare_inputs coerced the combined `timestamp` to the LAST source's contract type
+    (integer), so the saved code saw epoch integers instead of datetimes."""
+    report = ValidationReport(status="ready", mapping=MAPPING)
+    contract = freeze_contract([("ped.csv", RAW)], report, SPEC, dataset_ids=[1])
+    canon = apply_mapping(contract, [("ped.csv", RAW)])
+    prepare_inputs(list(zip(contract.files, canon)), None, [], tmp_path, contract=contract)
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    df = pd.read_parquet(tmp_path / manifest["files"][0]["path"])
+    assert str(df["timestamp"].dtype).startswith("datetime64"), df["timestamp"].dtype
+    assert df["timestamp"].astype(str).tolist() == EXPECTED

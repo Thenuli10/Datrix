@@ -159,3 +159,14 @@ def test_append_keeps_genuine_repeats_and_drops_only_overlap():
     # Re-uploading exactly the old data adds nothing.
     (same,) = append_datasets([old], [old.copy()])
     assert len(same) == 3
+
+
+def test_append_with_missing_values():
+    """Live failure: append crashed when a column had missing values (pandas 3 keeps NaN through astype(str))."""
+    import pandas as pd
+
+    from app.services.contract import append_datasets
+    old = pd.DataFrame({"sensor": ["A", None, "B"], "n": [1.0, 2.0, float("nan")]})
+    new = pd.DataFrame({"sensor": [None, "C"], "n": [2.0, 3.0]})  # (None, 2.0) already in old
+    (merged,) = append_datasets([old], [new])
+    assert len(merged) == 4 and merged["sensor"].iloc[-1] == "C"

@@ -311,5 +311,14 @@ def append_datasets(old_dfs: Sequence[pd.DataFrame], new_dfs: Sequence[pd.DataFr
 
 
 def _row_keys(df: pd.DataFrame) -> pd.Series:
-    """One comparable string per row (works for unhashable JSON cells and mixed dtypes)."""
-    return df.astype(str).agg("\x1f".join, axis=1)
+    """One comparable string per row (works for unhashable JSON cells, mixed dtypes and missing values).
+
+    Missing values become an explicit marker: under pandas 3 `astype(str)` keeps them as NaN floats, which
+    broke a live append on data with empty sensor names. Vectorised, so 1.5M rows take seconds."""
+    if not len(df.columns):
+        return pd.Series([""] * len(df), index=df.index)
+    parts = [df[c].astype(object).where(df[c].notna(), "\x00NA").astype(str) for c in df.columns]
+    key = parts[0]
+    for p in parts[1:]:
+        key = key + "\x1f" + p
+    return key

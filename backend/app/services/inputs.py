@@ -101,7 +101,12 @@ def prepare_inputs(datasets: Sequence[DatasetItem], mapping: Sequence[ColumnMapp
                                    "how": j.how})
 
     spec_cols = {c.name: c for c in spec.columns} if spec else {}
-    contract_types = {c.name: c.type for c in contract.columns} if contract else {}
+    # A contract type describes one SOURCE column. A canonical column combined from several sources (date + hour
+    # -> timestamp) has no single type there: taking the last one turned datetimes into integers on a live re-run,
+    # so such columns keep their inferred type.
+    canon_names = [c.name for c in contract.columns] if contract else []
+    contract_types = ({c.name: c.type for c in contract.columns if canon_names.count(c.name) == 1}
+                      if contract else {})
     files: list[dict[str, Any]] = []
     columns: dict[str, dict[str, str]] = {}
     for i, ((_, df), name) in enumerate(zip(pairs, names)):
