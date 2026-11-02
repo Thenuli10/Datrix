@@ -393,6 +393,7 @@ def _compose_dashboard(ctx: RunContext, run_id: int, run_dir: Path, results: Res
         all_issues = list(rule_issues)
         if quick and not open_issues:
             break  # repeat runs: screenshot review only if a rule fails
+        dom_issues: list[DashboardIssue] = []
         vision: list[DashboardIssue] = []
         if settings.screenshots_enabled:
             ctx.stage(f"Checking dashboard layout (round {rounds})")
@@ -401,9 +402,11 @@ def _compose_dashboard(ctx: RunContext, run_id: int, run_dir: Path, results: Res
             if paths:
                 vision = _cosmetic(ctx, "dashboard vision review", lambda: dashboard_qa.review(
                     llm, spec, [p.read_bytes() for p in paths], rule_issues + dom_issues, project_id), list)
-            vision = dom_issues + vision
-        all_issues += vision
-        open_issues += [i for i in vision if i.severity in ("high", "medium")]
+        all_issues += dom_issues + vision
+        # DOM checks measure the real page, so medium+ findings get a fix. The vision model produced false
+        # positives in live runs, so only its `high` findings cost a composer round; the rest are warnings.
+        open_issues += [i for i in dom_issues if i.severity in ("high", "medium")]
+        open_issues += [i for i in vision if i.severity == "high"]
         if not open_issues or rounds > settings.max_dashboard_qa_rounds:
             break
         ctx.log(f"[dashboard] {len(open_issues)} issue(s); asking the composer to fix")

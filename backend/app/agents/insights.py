@@ -10,7 +10,7 @@ HEADING = "## Key insights"
 def write(llm: LLMClient, requirement: str, results: Results, pid: int | None) -> str:
     user = f"## User's question\n{requirement}\n\n## results.json (long tables/series trimmed)\n{to_json(llm_results(results))}"
     md = llm.text(agent="insights", system=load_prompt("insights"), user=user, project_id=pid,
-                  model=settings.openai_small_model).strip()
+                  model=settings.openai_model).strip()  # user-facing claims: the small model got facts wrong
     if md.startswith("```"):
         md = md.strip("`").removeprefix("markdown").strip()
     if not md:

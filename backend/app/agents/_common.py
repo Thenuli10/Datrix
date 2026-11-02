@@ -58,6 +58,18 @@ LLM_SERIES_POINTS = 60
 LLM_LIST_ITEMS = 30
 
 
+def _series_stats(x: list[Any], y: list[Any]) -> dict[str, Any]:
+    """min/max (with their x), mean, first, last over the full series: a sampled series would otherwise
+    hide its real peak (a live run reported the max of 60 sampled points as the peak day)."""
+    pts = [(xi, yi) for xi, yi in zip(x, y) if isinstance(yi, (int, float)) and yi == yi]
+    if not pts:
+        return {}
+    lo, hi = min(pts, key=lambda p: p[1]), max(pts, key=lambda p: p[1])
+    return {"min": {"x": lo[0], "y": lo[1]}, "max": {"x": hi[0], "y": hi[1]},
+            "mean": round(sum(p[1] for p in pts) / len(pts), 4), "first": {"x": pts[0][0], "y": pts[0][1]},
+            "last": {"x": pts[-1][0], "y": pts[-1][1]}}
+
+
 def llm_results(r: BaseModel) -> dict[str, Any]:
     """results.json capped for prompts: long tables/series are trimmed (with their true sizes),
     so a big output (e.g. a 10k-row predictions table) can never blow up a prompt."""
@@ -68,7 +80,9 @@ def llm_results(r: BaseModel) -> dict[str, Any]:
     for s in d.get("series") or []:
         n = len(s["x"])
         s["n_points"] = n
+        s["stats"] = _series_stats(s["x"], s["y"])  # exact, from the full series, before any sampling
         if n > LLM_SERIES_POINTS:  # evenly spaced, first and last kept
+            s["sampled"] = True
             idx = sorted({round(i * (n - 1) / (LLM_SERIES_POINTS - 1)) for i in range(LLM_SERIES_POINTS)})
             for k in ("x", "y", "y_lower", "y_upper"):
                 if isinstance(s.get(k), list) and len(s[k]) == n:
